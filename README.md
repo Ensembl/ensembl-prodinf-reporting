@@ -1,8 +1,10 @@
 EnsEMBL - Production Reporting Applications
 ===========================================
 
-This repository contains Python applications used for reporting status and
-outcomes of EnsEMBL Production Pipelines and other internal Production services.
+[![Build Status](https://travis-ci.com/Ensembl/ensembl-prodinf-reporting.svg?token=5zKzvNKrmopKSdQGqBxH&branch=main)](https://travis-ci.com/Ensembl/ensembl-prodinf-reporting) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/Ensembl/ensembl-prodinf-reporting/blob/main/LICENSE)
+
+Python applications used for reporting status and outcomes of EnsEMBL Production
+Pipelines and other internal Production services.
 
 
 AMQP Reporter
@@ -42,7 +44,7 @@ message on the queue must have the following structure:
   "subject": "My Subject",
   "from": "the.sender@email.org",
   "to": ["receiver1@email.org", "receiver2@email.org"],
-  "body": "Hello!"
+  "content": "Hello!"
 }
 ```
 

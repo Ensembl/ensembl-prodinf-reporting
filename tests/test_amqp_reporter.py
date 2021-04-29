@@ -15,6 +15,16 @@ import urllib3
 
 import pytest
 
+from ensembl.production.reporting.config import config
+from ensembl.production.reporting.amqp_reporter import validate_payload, compose_email
+from ensembl.production.reporting.amqp_reporter import AMQP_URI
+
+
+SMTP_TEST_SERVER_HOST = "127.0.0.1"
+SMTP_TEST_SERVER_PORT = 10025
+
+AMQP_MANAGEMENT_PORT = 15672
+
 
 class HostPort(NamedTuple):
     host: str
@@ -37,10 +47,57 @@ def queue_consumer(queue: Queue):
 
 
 def wait_for(url: str, retries: int = 8, backoff: float = 0.2):
-    retry = urllib3.Retry(total=retries, backoff_factor=backoff,
-                          status_forcelist=[404, 500, 502, 503, 504])
+    retry = urllib3.Retry(
+        total=retries,
+        backoff_factor=backoff,
+        status_forcelist=[404, 500, 502, 503, 504],
+    )
     manager = urllib3.PoolManager(retries=retry)
-    manager.request('GET', url)
+    manager.request("GET", url)
+
+
+@pytest.fixture(scope="session")
+def valid_email_message():
+    message = {
+        "subject": "Test Email",
+        "from": "sender@email.org",
+        "to": ["receiver1@email.org", "receiver2@email.org"],
+        "content": "Hello!",
+    }
+    return message
+
+
+@pytest.fixture
+def amqp_publish():
+    wait_for(f"http://{config.amqp_host}:{AMQP_MANAGEMENT_PORT}/")
+    connection = kombu.Connection(AMQP_URI)
+    queue = connection.SimpleQueue("test_queue")
+
+    def publisher(message: dict) -> None:
+        queue.put(message, serializer="json")
+
+    try:
+        yield publisher
+    finally:
+        queue.clear()
+        queue.close()
+
+
+@pytest.fixture
+def elastic_search():
+    wait_for(f"http://{config.es_host}:{config.es_port}/")
+    es = Elasticsearch([{"host": config.es_host, "port": config.es_port}])
+
+    def search(body: dict) -> None:
+        es.indices.flush()
+        es.indices.refresh()
+        return es.search(index="test", body=body)
+
+    try:
+        yield search
+    finally:
+        if es.indices.exists("test"):
+            es.indices.delete("test")
 
 
 @pytest.fixture
@@ -55,9 +112,11 @@ def smtp_messages():
             data = envelope.content  # type: bytes
             msg = SMTPMessage(peer, mail_from, rcpt_tos, data)
             message_q.put(msg)
-            return '250 OK'
+            return "250 OK"
 
-    controller = SMTPController(SMTPHandler(), hostname='127.0.0.1', port=10025)
+    controller = SMTPController(
+        SMTPHandler(), hostname=SMTP_TEST_SERVER_HOST, port=SMTP_TEST_SERVER_PORT
+    )
     controller.start()
     try:
         yield queue_consumer(message_q)
@@ -66,15 +125,15 @@ def smtp_messages():
 
 
 def read_output(out_stream: BinaryIO, out_queue: Queue) -> None:
-    for line in iter(out_stream.readline, b''):
-        out_queue.put(line.decode('utf-8'))
+    for line in iter(out_stream.readline, b""):
+        out_queue.put(line.decode("utf-8"))
     out_stream.close()
 
 
 def make_program(extra_env: dict) -> Tuple[Popen, Thread, Queue]:
     env = os.environ.copy()
     env.update(extra_env)
-    program = ['python', 'ensembl/production/reporting/amqp_reporter.py']
+    program = ["python", "ensembl/production/reporting/amqp_reporter.py"]
     queue: Queue = Queue()
     sub_p = Popen(program, stdout=PIPE, env=env)
     reader_t = Thread(target=read_output, args=(sub_p.stdout, queue))
@@ -84,9 +143,9 @@ def make_program(extra_env: dict) -> Tuple[Popen, Thread, Queue]:
 
 
 @pytest.fixture
-def program_out_es():
+def program_out_es(elastic_search):
     extra_env = {
-        'REPORTER_TYPE': 'elasticsearch',
+        "REPORTER_TYPE": "elasticsearch",
     }
     sub_p, reader_t, queue_gen = make_program(extra_env)
     reader_t.start()
@@ -100,8 +159,8 @@ def program_out_es():
 @pytest.fixture
 def program_out_smtp():
     extra_env = {
-        'REPORTER_TYPE': 'email',
-        'SMTP_PORT': '10025'
+        "REPORTER_TYPE": "email",
+        "SMTP_PORT": str(SMTP_TEST_SERVER_PORT)
     }
     sub_p, reader_t, queue_gen = make_program(extra_env)
     reader_t.start()
@@ -112,62 +171,96 @@ def program_out_smtp():
         reader_t.join(5)
 
 
-@pytest.fixture
-def amqp_publish():
-    wait_for("http://localhost:15672/")
-    connection = kombu.Connection("amqp://guest:guest@localhost:5672//")
-    exchange = kombu.Exchange('test_exchange', type='topic')
-    queue = kombu.Queue('test_queue', exchange)
-    producer = connection.Producer()
-
-    def publisher(message: dict) -> None:
-        producer.publish(message,
-                         exchange=exchange,
-                         declare=[queue],
-                         retry=True,
-                         serializer='json',
-                         delivery_mode=2)
-    return publisher
+def test_validate_payload_ok():
+    valid_message = '{"hello": "world"}'
+    payload = validate_payload(valid_message)
+    assert payload == {"hello": "world"}
 
 
-@pytest.fixture
-def elastic_search():
-    wait_for("http://localhost:9200/")
-    es = Elasticsearch([{'host': 'localhost', 'port': 9200}])
+@pytest.mark.parametrize(
+    "invalid_message",
+    ['"This is a valid JSON but not an object"', "This is not a JSON"],
+)
+def test_validate_payload_raise(invalid_message):
+    with pytest.raises(ValueError):
+        validate_payload(invalid_message)
 
-    def search(body: dict) -> None:
-        es.indices.flush()
-        es.indices.refresh()
-        return es.search(index='test', body=body)
 
-    yield search
-    es.indices.delete('test')
+def test_compose_email_ok(valid_email_message):
+    message = compose_email(valid_email_message)
+    assert message["Subject"] == valid_email_message["subject"]
+    assert message["From"] == valid_email_message["from"]
+    assert message["To"] == ", ".join(valid_email_message["to"])
+    assert message.get_content().strip() == valid_email_message["content"]
+
+
+@pytest.mark.parametrize(
+    "invalid_email_message",
+    [
+        {},
+        {
+            "from": "me@me.com",
+            "to": ["you@org.com"],
+            "subject": "This email is missing content",
+        },
+    ],
+)
+def test_compose_email_raises(invalid_email_message):
+    with pytest.raises(ValueError):
+        compose_email(invalid_email_message)
 
 
 def test_consume_and_es_post_success(amqp_publish, elastic_search, program_out_es):
-    message = {'message': 'hello!'}
+    message = {"message": "hello!"}
     amqp_publish(message)
     for line in program_out_es:
         if "Acked:" in line:
             break
     else:
         assert False, "Reached end of output without acking the message"
-    res = elastic_search({"query": {
-                             "query_string": {
-                                 "query": "message:\"hello!\""
-                             }
-                         }})
-    first_res = res['hits']['hits'][0]
-    assert first_res['_source'] == message
+    res = elastic_search({"query": {"query_string": {"query": 'message:"hello!"'}}})
+    first_res = res["hits"]["hits"][0]
+    assert first_res["_source"] == message
 
 
-def test_consume_and_sendmail_success(amqp_publish, smtp_messages, program_out_smtp):
-    message = {
-        'subject': 'Test Email',
-        'from': 'sender@email.org',
-        'to': ['receiver1@email.org', 'receiver2@email.org'],
-        'body': 'Hello!',
-    }
+def test_consume_and_reject(amqp_publish, program_out_es):
+    message = "Invalid Message"
+    amqp_publish(message)
+    for line in program_out_es:
+        if "Acked:" in line:
+            assert False, "Should not have acked the message!"
+        if "Rejected:" in line:
+            break
+    else:
+        assert False, "Reached end of output without acking the message"
+
+
+def test_consume_and_es_post_after_reject(amqp_publish, elastic_search, program_out_es):
+    message = "Invalid Message"
+    amqp_publish(message)
+    for line in program_out_es:
+        if "Acked:" in line:
+            assert False, "Should not have acked the message!"
+        if "Rejected:" in line:
+            break
+    else:
+        assert False, "Reached end of output without acking the message"
+    message = {"message": "hello!"}
+    amqp_publish(message)
+    for line in program_out_es:
+        if "Acked:" in line:
+            break
+    else:
+        assert False, "Reached end of output without acking the message"
+    res = elastic_search({"query": {"query_string": {"query": 'message:"hello!"'}}})
+    first_res = res["hits"]["hits"][0]
+    assert first_res["_source"] == message
+
+
+def test_consume_and_sendmail_success(
+    amqp_publish, smtp_messages, program_out_smtp, valid_email_message
+):
+    message = valid_email_message
     amqp_publish(message)
     for line in program_out_smtp:
         if "Acked:" in line:
@@ -175,12 +268,14 @@ def test_consume_and_sendmail_success(amqp_publish, smtp_messages, program_out_s
     else:
         assert False, "Reached end of output without acking the message"
     for received_smtp in smtp_messages:
-        received_email = EmailParser(policy=default_policy).parsebytes(received_smtp.message)
-        assert received_smtp.sender == message['from']
-        assert received_email['from'] == message['from']
-        assert received_smtp.receivers == message['to']
-        assert received_email['to'] == ', '.join(message['to'])
-        assert received_smtp.remote_host[0] == '127.0.0.1'
-        assert received_email['subject'] == message['subject']
-        assert received_email.get_content().strip() == message['body']
+        received_email = EmailParser(policy=default_policy).parsebytes(
+            received_smtp.message
+        )
+        assert received_smtp.sender == message["from"]
+        assert received_email["from"] == message["from"]
+        assert received_smtp.receivers == message["to"]
+        assert received_email["to"] == ", ".join(message["to"])
+        assert received_smtp.remote_host[0] == SMTP_TEST_SERVER_HOST
+        assert received_email["subject"] == message["subject"]
+        assert received_email.get_content().strip() == message["content"]
         break
