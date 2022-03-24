@@ -1,2 +1,2 @@
-elasticsearch
+elasticsearch6==6.8.1
 kombu
