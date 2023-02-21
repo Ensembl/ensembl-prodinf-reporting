@@ -26,6 +26,8 @@ class Config(NamedTuple):
     es_protocol: str
     smtp_host: str
     smtp_port: int
+    smtp_user: str
+    smtp_pass: str
 
 
 parser = configparser.ConfigParser()
@@ -61,4 +63,6 @@ config = Config(
     es_protocol="https" if parse_debug_var(os.getenv("ES_SSL", file_config.get("es_ssl", "false"))) else "http",
     smtp_host=os.getenv("SMTP_HOST", file_config.get("smtp_host", "127.0.0.1")),
     smtp_port=int(os.getenv("SMTP_PORT", file_config.get("smtp_port", "25"))),
+    smtp_user=os.getenv("SMTP_USER", file_config.get("smtp_user", "production@ensembl.org")),
+    smtp_pass=os.getenv("SMTP_PASS", file_config.get("smtp_pass", "defaultpass")),
 )
