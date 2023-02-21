@@ -86,7 +86,7 @@ def amqp_publish():
 @pytest.fixture
 def elastic_search():
     wait_for(f"http://{config.es_host}:{config.es_port}/")
-    es = Elasticsearch([{"host": config.es_host, "port": config.es_port}])
+    es = Elasticsearch(f"http://{config.es_user}:{config.es_password}@{config.es_host}:{config.es_port}")
 
     def search(body: dict) -> None:
         es.indices.flush()
