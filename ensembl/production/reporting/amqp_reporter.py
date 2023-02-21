@@ -7,9 +7,9 @@ from smtplib import SMTP, SMTPException
 import sys
 from typing import Any
 
-from kombu import Connection, Queue, Producer, Consumer, Message
+from kombu import Connection, Queue, Consumer, Message
 from kombu.asynchronous import Hub
-from elasticsearch import Elasticsearch, ElasticsearchException
+from elasticsearch6 import Elasticsearch, ElasticsearchException
 
 from ensembl.production.reporting.config import config
 
@@ -67,8 +67,8 @@ def es_reporter():
             )
         except ElasticsearchException as err:
             logger.error("Cannot modify index %s. Error: %s", config.es_index, err)
-            message.requeue()
-            logger.warning("Requeued: %s", message.body)
+            message.reject()
+            logger.warning("Rejected: %s", message.body)
             return
         logger.debug(
             "To index: %s, type: %s, document: %s",
@@ -82,14 +82,17 @@ def es_reporter():
     try:
         yield on_message
     finally:
-        es.close()
+        try:
+            es.close()
+        except AttributeError:
+            pass
 
 
 def compose_email(email: dict) -> EmailMessage:
     msg = EmailMessage()
     try:
         msg["Subject"] = email["subject"]
-        msg["From"] = email["from"]
+        msg["From"] = config.smtp_user
         msg["To"] = email["to"]  # This can be a list of str
         msg.set_content(email["content"])
     except KeyError as err:
@@ -122,13 +125,15 @@ def smtp_reporter():
             return
         try:
             with SMTP(host=config.smtp_host, port=config.smtp_port) as smtp:
+                smtp.starttls()  #TODO: We should check server's certificate here.
+                smtp.login(config.smtp_user, config.smtp_pass)
                 smtp.send_message(msg)
-        except SMTPException as err:
+        except (ConnectionRefusedError, SMTPException) as err:
             logger.error("Cannot send email message: %s Message: %s", err, email)
-            message.requeue()
-            logger.warning("Requeued: %s", message.body)
+            message.reject()
+            logger.warning("Rejected: %s", message.body)
             return
-        logger.debug("Email sent: %s", email)
+        logger.info("Email sent: %s", email)
         message.ack()
         logger.debug("Acked: %s", message.body)
 
@@ -137,6 +142,7 @@ def smtp_reporter():
 
 def stop_gracefully():
     hub.close()
+    conn.release()
     hub.stop()
 
 
@@ -150,20 +156,15 @@ def sigterm_handler(_signum, _frame):
     stop_gracefully()
 
 
-def release_connection(_hub):
-    conn.release()
-
-
 def main():
     signal.signal(signal.SIGINT, sigint_handler)
     signal.signal(signal.SIGTERM, sigterm_handler)
     try:
         conn.register_with_event_loop(hub)
     except ConnectionRefusedError as err:
-        logger.critical("Cannot connect to %s", AMQP_URI)
+        logger.critical("Cannot connect to %s: %s", AMQP_URI, err)
         logger.critical("Exiting.")
         sys.exit(1)
-    hub.on_close.add(release_connection)
 
     logger.info("Configuration: %s", config)
     if config.reporter_type == "elasticsearch":
@@ -176,6 +177,7 @@ def main():
             [queue],
             prefetch_count=config.amqp_prefetch,
             on_message=on_message_report,
+            auto_declare=False
         ):
             logger.info("Starting main loop")
             hub.run_forever()
