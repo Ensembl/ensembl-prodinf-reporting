@@ -44,7 +44,7 @@ def validate_payload(message_body: Any) -> dict:
 
 @contextmanager
 def es_reporter():
-    es = Elasticsearch([{"host": config.es_host, "port": config.es_port}])
+    es = Elasticsearch(f"{config.es_protocol}://{config.es_user}:{config.es_password}@{config.es_host}:{config.es_port}")
     if not es.ping():
         logger.error(
             "Cannot connect to Elasticsearch server. Host: %s, Port: %s",

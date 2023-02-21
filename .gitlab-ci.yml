@@ -22,7 +22,7 @@ test:
   services:
     - name: rabbitmq:3.8.21-management
       alias: rabbitmq-test
-    - name: docker.elastic.co/elasticsearch/elasticsearch:6.2.4
+    - name: docker.elastic.co/elasticsearch/elasticsearch:6.8.9
       alias: elasticsearch-test
       command: ["bin/elasticsearch", "-Ediscovery.type=single-node"]
 
