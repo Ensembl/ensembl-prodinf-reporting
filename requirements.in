@@ -1,2 +1,2 @@
-elasticsearch6==6.8.1
+elasticsearch>=6.0.0,<7.0.0
 kombu

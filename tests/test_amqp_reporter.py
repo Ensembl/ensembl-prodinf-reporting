@@ -10,7 +10,7 @@ from typing import BinaryIO, NamedTuple, List, Tuple
 
 from aiosmtpd.controller import Controller as SMTPController
 from aiosmtpd import smtp
-from elasticsearch6 import Elasticsearch
+from elasticsearch import Elasticsearch
 import kombu
 import urllib3
 
@@ -87,7 +87,10 @@ def amqp_publish():
 @pytest.fixture
 def elastic_search():
     wait_for(f"http://{config.es_host}:{config.es_port}/")
-    es = Elasticsearch(f"http://{config.es_user}:{config.es_password}@{config.es_host}:{config.es_port}")
+    es = Elasticsearch(f"{config.es_protocol}://{config.es_host}:{config.es_port}",
+                       http_auth=(config.es_user, config.es_password),
+                       use_ssl=config.es_ssl,
+                       verify_certs=False)
 
     def search(body: dict) -> None:
         es.indices.flush()

@@ -9,7 +9,7 @@ from typing import Any
 
 from kombu import Connection, Queue, Consumer, Message
 from kombu.asynchronous import Hub
-from elasticsearch6 import Elasticsearch, ElasticsearchException
+from elasticsearch import Elasticsearch, ElasticsearchException
 
 from ensembl.production.reporting.config import config
 
@@ -44,7 +44,10 @@ def validate_payload(message_body: Any) -> dict:
 
 @contextmanager
 def es_reporter():
-    es = Elasticsearch(f"{config.es_protocol}://{config.es_user}:{config.es_password}@{config.es_host}:{config.es_port}")
+    es = Elasticsearch(f"{config.es_protocol}://{config.es_host}:{config.es_port}",
+                       http_auth=(config.es_user, config.es_password),
+                       use_ssl=config.es_ssl,
+                       verify_certs=False)
     if not es.ping():
         logger.error(
             "Cannot connect to Elasticsearch server. Host: %s, Port: %s",
