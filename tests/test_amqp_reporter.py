@@ -11,16 +11,18 @@ from typing import BinaryIO, NamedTuple, List, Tuple
 from aiosmtpd.controller import Controller as SMTPController
 from aiosmtpd import smtp
 from elasticsearch import Elasticsearch
+from elasticsearch.connection import create_ssl_context
+
 import kombu
 import urllib3
-
 import pytest
+
 
 from ensembl.production.reporting.config import config
 from ensembl.production.reporting.amqp_reporter import validate_payload, compose_email
 from ensembl.production.reporting.amqp_reporter import AMQP_URI
 
-
+urllib3.disable_warnings(category=urllib3.connectionpool.InsecureRequestWarning)
 SMTP_TEST_SERVER_HOST = "127.0.0.1"
 SMTP_TEST_SERVER_PORT = 10025
 
@@ -87,10 +89,13 @@ def amqp_publish():
 @pytest.fixture
 def elastic_search():
     wait_for(f"http://{config.es_host}:{config.es_port}/")
-    es = Elasticsearch(f"{config.es_protocol}://{config.es_host}:{config.es_port}",
-                       http_auth=(config.es_user, config.es_password),
-                       use_ssl=config.es_ssl,
-                       verify_certs=False)
+    ssl_context = create_ssl_context()
+    ssl_context.check_hostname = config.es_ssl
+    ssl_context.verify_mode = ssl.CERT_NONE
+    es = Elasticsearch(hosts=[{'host': config.es_host,'port': config.es_port}],
+                       scheme=config.es_protocol,
+                       ssl_context=ssl_context,
+                       http_auth=(config.es_user, config.es_password))
 
     def search(body: dict) -> None:
         es.indices.flush()
