@@ -1,18 +1,30 @@
-from contextlib import contextmanager
-from email.message import EmailMessage
-import logging
+#    See the NOTICE file distributed with this work for additional information
+#    regarding copyright ownership.
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#        http://www.apache.org/licenses/LICENSE-2.0
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
 import json
+import logging
 import signal
-from smtplib import SMTP, SMTPException
+import ssl
 import sys
-from typing import Any
-
+import urllib3
+from contextlib import contextmanager
+from elasticsearch import Elasticsearch, ElasticsearchException
+from elasticsearch.connection import create_ssl_context
+from email.message import EmailMessage
 from kombu import Connection, Queue, Consumer, Message
 from kombu.asynchronous import Hub
-from elasticsearch6 import Elasticsearch, ElasticsearchException
+from smtplib import SMTP, SMTPException
+from typing import Any
 
 from ensembl.production.reporting.config import config
-
 
 LOG_LEVEL = logging.DEBUG if config.debug else logging.INFO
 logging.basicConfig(
@@ -44,7 +56,14 @@ def validate_payload(message_body: Any) -> dict:
 
 @contextmanager
 def es_reporter():
-    es = Elasticsearch(f"{config.es_protocol}://{config.es_user}:{config.es_password}@{config.es_host}:{config.es_port}")
+    urllib3.disable_warnings(category=urllib3.connectionpool.InsecureRequestWarning)
+    ssl_context = create_ssl_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    es = Elasticsearch(hosts=[{'host': config.es_host,'port': config.es_port}],
+                       scheme=config.es_protocol,
+                       ssl_context=ssl_context,
+                       http_auth=(config.es_user, config.es_password))
     if not es.ping():
         logger.error(
             "Cannot connect to Elasticsearch server. Host: %s, Port: %s",
