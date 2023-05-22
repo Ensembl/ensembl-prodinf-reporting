@@ -35,7 +35,6 @@ logging.basicConfig(
 
 logger = logging.getLogger("amqp_reporter")
 
-
 queue = Queue(config.amqp_queue)
 AMQP_URI = f"amqp://{config.amqp_user}:{config.amqp_pass}@{config.amqp_host}:{config.amqp_port}/{config.amqp_virtual_host}"
 conn = Connection(AMQP_URI)
@@ -60,7 +59,7 @@ def es_reporter():
     ssl_context = create_ssl_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
-    es = Elasticsearch(hosts=[{'host': config.es_host,'port': config.es_port}],
+    es = Elasticsearch(hosts=[{'host': config.es_host, 'port': config.es_port}],
                        scheme=config.es_protocol,
                        ssl_context=ssl_context,
                        http_auth=(config.es_user, config.es_password))
@@ -144,8 +143,9 @@ def smtp_reporter():
             return
         try:
             with SMTP(host=config.smtp_host, port=config.smtp_port) as smtp:
-                smtp.starttls()  #TODO: We should check server's certificate here.
-                smtp.login(config.smtp_user, config.smtp_pass)
+                smtp.starttls()  # TODO: We should check server's certificate here.
+                if config.smtp_user is not None:
+                    smtp.login(config.smtp_user, config.smtp_pass)
                 smtp.send_message(msg)
         except (ConnectionRefusedError, SMTPException) as err:
             logger.error("Cannot send email message: %s Message: %s", err, email)
@@ -192,11 +192,11 @@ def main():
         report = smtp_reporter()
     with report as on_message_report:
         with Consumer(
-            conn,
-            [queue],
-            prefetch_count=config.amqp_prefetch,
-            on_message=on_message_report,
-            auto_declare=False
+                conn,
+                [queue],
+                prefetch_count=config.amqp_prefetch,
+                on_message=on_message_report,
+                auto_declare=False
         ):
             logger.info("Starting main loop")
             hub.run_forever()
