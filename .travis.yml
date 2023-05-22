@@ -7,13 +7,13 @@ services:
   - docker
 
 before_script:
-  - docker-compose -f tests/docker-compose.yml up -d
+  - docker-compose -f src/tests/docker-compose.yml up -d
   - pip install -r requirements-test.txt
   - pip install .
 
 script:
-  - coverage run -m pytest tests
+  - coverage run -m pytest src/tests
   - coverage report -m
 
 after_script:
-  - docker-compose -f tests/docker-compose.yml down
+  - docker-compose -f src/tests/docker-compose.yml down
