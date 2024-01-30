@@ -17,7 +17,6 @@ import kombu
 import urllib3
 import pytest
 
-
 from ensembl.production.reporting.config import config
 from ensembl.production.reporting.amqp_reporter import validate_payload, compose_email
 from ensembl.production.reporting.amqp_reporter import AMQP_URI
@@ -29,6 +28,7 @@ SMTP_TEST_SERVER_PORT = 10025
 AMQP_MANAGEMENT_PORT = 15672
 
 THIS_DIR = Path(__file__).resolve().parent
+
 
 class HostPort(NamedTuple):
     host: str
@@ -92,7 +92,7 @@ def elastic_search():
     ssl_context = create_ssl_context()
     ssl_context.check_hostname = config.es_ssl
     ssl_context.verify_mode = ssl.CERT_NONE
-    es = Elasticsearch(hosts=[{'host': config.es_host,'port': config.es_port}],
+    es = Elasticsearch(hosts=[{'host': config.es_host, 'port': config.es_port}],
                        scheme=config.es_protocol,
                        ssl_context=ssl_context,
                        http_auth=(config.es_user, config.es_password))
@@ -113,7 +113,7 @@ def elastic_search():
 def smtp_messages():
     message_q: Queue = Queue()
     ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    ssl_context.load_cert_chain(THIS_DIR/"test_cert.pem", THIS_DIR/"test_key.pem")
+    ssl_context.load_cert_chain(THIS_DIR / "test_cert.pem", THIS_DIR / "test_key.pem")
 
     class SMTPHandler:
         async def handle_DATA(self, _server, session, envelope):
@@ -159,7 +159,7 @@ def read_output(out_stream: BinaryIO, out_queue: Queue) -> None:
 def make_program(extra_env: dict) -> Tuple[Popen, Thread, Queue]:
     env = os.environ.copy()
     env.update(extra_env)
-    program = ["python", "ensembl/production/reporting/amqp_reporter.py"]
+    program = ["python", "src/ensembl/production/reporting/amqp_reporter.py"]
     queue: Queue = Queue()
     sub_p = Popen(program, stdout=PIPE, env=env)
     reader_t = Thread(target=read_output, args=(sub_p.stdout, queue))
@@ -283,7 +283,7 @@ def test_consume_and_es_post_after_reject(amqp_publish, elastic_search, program_
 
 
 def test_consume_and_sendmail_success(
-    amqp_publish, smtp_messages, program_out_smtp, valid_email_message
+        amqp_publish, smtp_messages, program_out_smtp, valid_email_message
 ):
     message = valid_email_message
     amqp_publish(message)

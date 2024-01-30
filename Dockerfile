@@ -12,7 +12,8 @@ ENV PYTHONUNBUFFERED 1
 COPY . /usr/src/app/
 
 # install python packages
-RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir .
+ENV PYTHONPATH=${PYTHONPATH}:/usr/src/app/src
 
-CMD ["python", "ensembl/production/reporting/amqp_reporter.py"]
+CMD ["python", "src/ensembl/production/reporting/amqp_reporter.py"]
