@@ -3,6 +3,8 @@ dist: jammy
 python:
 - "3.10"
 
+sudo: required
+
 services:
   - docker
 
