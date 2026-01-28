@@ -53,7 +53,7 @@ message on the queue must have the following structure:
 AMQP Reporter runs in the foreground and can be started with the command:
 
 ```
-python ensembl/production/reporting/amqp_reporter.py
+python src/ensembl/production/reporting/amqp_reporter.py
 ```
 Or by running a Docker container (see `Dockerfile`)
 
